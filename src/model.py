@@ -85,3 +85,17 @@ class NeuralNet:
         if apply_softmax:
             return softmax(logits)
         return logits
+
+
+if __name__ == "__main__":
+    # quick sanity test or demo
+    BATCH_SIZE = 5
+    X_fake = np.random.rand(BATCH_SIZE, 784).astype(np.float32)
+
+    model = NeuralNet()
+    logits = model.forward(X_fake)
+    probs = model.forward(X_fake, apply_softmax=True)
+
+    print("logits shape:", logits.shape)
+    print("probs shape:", probs.shape)
+    print("row sums:", probs.sum(axis=1))
