@@ -1,24 +1,78 @@
+from __future__ import annotations
+
 import numpy as np
 
+Array = np.ndarray
+Gradients = dict[str, list[Array]]
 
-def relu(x: np.ndarray) -> np.ndarray:
-    """Elementwise ReLU activation"""
+
+def relu(x: Array) -> Array:
+    """
+    Apply the ReLU activation function elementwise.
+
+    Args:
+        x:
+            Input array.
+
+    Returns:
+        An array with negative values replaced by zero.
+    """
     return np.maximum(0, x)
 
 
-def softmax(x: np.ndarray) -> np.ndarray:
+def relu_derivative(x: Array) -> Array:
     """
-    Numerically stable softmax over the last dimension.
-    x: (batch_size, num_classes)
+    Compute the derivative of ReLU with respect to its input.
+
+    Args:
+        x:
+            Pre-activation values.
+
+    Returns:
+        An array containing 1 where x > 0 and 0 elsewhere.
     """
-    x_shifted = x - np.max(x, axis=1, keepdims=True)
-    exp_x = np.exp(x_shifted)
-    return exp_x / np.sum(exp_x, axis=1, keepdims=True)
+    return (x > 0).astype(np.float32)
+
+
+def softmax(logits: Array) -> Array:
+    """
+    Convert logits into probabilities using a numerically stable softmax.
+
+    Args:
+        logits:
+            Raw class scores with shape (batch_size, num_classes).
+
+    Returns:
+        Class probabilities with shape (batch_size, num_classes).
+    """
+    shifted_logits = logits - np.max(logits, axis=1, keepdims=True)
+    exp_values = np.exp(shifted_logits)
+    probabilities = exp_values / np.sum(exp_values, axis=1, keepdims=True)
+
+    return probabilities
 
 
 class NeuralNet:
     """
-    Fully connected MLP for MNIST: 784 -> 128 -> 64 -> 10.
+    A fully connected multilayer perceptron for MNIST classification.
+
+    Args:
+        input_dim:
+            Number of input features.
+            For flattened MNIST images, this is 784.
+
+        hidden_dims:
+            Hidden-layer widths.
+
+        output_dim:
+            Number of output classes.
+            For MNIST, this is 10.
+
+        weight_scale:
+            Standard deviation multiplier used for random weight initialization.
+
+        rng:
+            Optional NumPy random generator for reproducible initialization.
     """
 
     def __init__(
@@ -34,34 +88,54 @@ class NeuralNet:
 
         self.rng = rng if rng is not None else np.random.default_rng()
 
-        # Parameters
-        self.weights: list[np.ndarray] = []
-        self.biases: list[np.ndarray] = []
+        self.weights: list[Array] = []
+        self.biases: list[Array] = []
 
         for in_dim, out_dim in zip(self.layer_dims[:-1], self.layer_dims[1:]):
-            W = weight_scale * self.rng.standard_normal(
-                size=(in_dim, out_dim), dtype=np.float32
+            weight = weight_scale * self.rng.standard_normal(
+                size=(in_dim, out_dim),
+                dtype=np.float32,
             )
-            b = np.zeros((1, out_dim), dtype=np.float32)
+            bias = np.zeros((1, out_dim), dtype=np.float32)
 
-            self.weights.append(W)
-            self.biases.append(b)
+            self.weights.append(weight)
+            self.biases.append(bias)
 
-        self._cache: dict[str, list[np.ndarray]] = {}
+        self._cache: dict[str, list[Array] | Array] = {}
 
-    def forward(self, X: np.ndarray, apply_softmax: bool = False) -> np.ndarray:
+    def forward(self, X: Array, apply_softmax: bool = False) -> Array:
         """
-        Forward pass through the network
+        Run a forward pass through the network.
 
-        X: (batch_size, input_dim)
-        returns:
-            logits if apply_softmax = False
-            probabilities if apply_softmax=True
+        Args:
+            X:
+                Input batch with shape (batch_size, input_dim).
+
+            apply_softmax:
+                If True, return class probabilities instead of raw logits.
+
+        Returns:
+            Raw logits if apply_softmax=False.
+            Class probabilities if apply_softmax=True.
+
+        Notes:
+            This method stores intermediate values in self._cache for backward().
         """
-        activations = [X]
-        pre_activations = []
+        if X.ndim != 2:
+            raise ValueError(
+                f"Expected X to have shape (batch_size, input_dim), got {X.shape}"
+            )
+
+        if X.shape[1] != self.layer_dims[0]:
+            raise ValueError(
+                f"Expected input dimension {self.layer_dims[0]}, got {X.shape[1]}"
+            )
+
+        activations: list[Array] = [X]
+        pre_activations: list[Array] = []
 
         A = X
+
         for layer_idx in range(self.num_layers - 1):
             W = self.weights[layer_idx]
             b = self.biases[layer_idx]
@@ -72,112 +146,214 @@ class NeuralNet:
             pre_activations.append(Z)
             activations.append(A)
 
-        # Output layer: linear only (no activation here)
         W_out = self.weights[-1]
         b_out = self.biases[-1]
-        logits = activations[-1] @ W_out + b_out  # (batch_size, output_dim)
+        logits = A @ W_out + b_out
 
-        # Cache for backward
-        self._cache["activations"] = activations
-        self._cache["pre_activations"] = pre_activations
-        self._cache["logits"] = logits
+        self._cache = {
+            "activations": activations,
+            "pre_activations": pre_activations,
+            "logits": logits,
+        }
 
         if apply_softmax:
             return softmax(logits)
+
         return logits
 
-    def backward(
-        self,
-        dlogits: np.ndarray,
-        cache: dict[str, list[np.ndarray] | np.ndarray],
-    ) -> dict[str, list[np.ndarray]]:
+    def backward(self, dlogits: Array) -> Gradients:
         """
         Run backpropagation through the network.
 
         Args:
             dlogits:
-                Gradient of the loss with respect to the output logits
-                Shape: (batch_size, output_size)
+                Gradient of the loss with respect to the output logits.
+                Shape: (batch_size, output_dim).
 
-            cache:
-                Cache returned by the forward pass
         Returns:
-            A dictionary containing gradients for weights and biases
+            A dictionary containing:
+
+            - "weights": gradients for each weight matrix
+            - "biases": gradients for each bias vector
         """
-        activations = cache["activations"]
-        pre_activations = cache["pre-activations"]
+        if not self._cache:
+            raise ValueError("No cache found. Run forward() before backward().")
+
+        activations = self._cache["activations"]
+        pre_activations = self._cache["pre_activations"]
 
         if not isinstance(activations, list):
-            raise TypeError("cache['activations'] must be a list")
+            raise TypeError("self._cache['activations'] must be a list.")
 
         if not isinstance(pre_activations, list):
-            raise TypeError("cache['pre_activations'] must be a list")
+            raise TypeError("self._cache['pre_activations'] must be a list.")
 
-        grad_weights: list[np.ndarray] = [np.zeros_like(w) for w in self.weights]
-        grad_biases: list[np.ndarray] = [np.zeros_like(b) for b in self.biases]
+        if dlogits.ndim != 2:
+            raise ValueError(
+                f"Expected dlogits to have shape (batch_size, output_dim), "
+                f"got {dlogits.shape}"
+            )
+
+        expected_output_dim = self.layer_dims[-1]
+        if dlogits.shape[1] != expected_output_dim:
+            raise ValueError(
+                f"Expected dlogits second dimension to be {expected_output_dim}, "
+                f"got {dlogits.shape[1]}"
+            )
+
+        grad_weights: list[Array] = [np.zeros_like(weight) for weight in self.weights]
+        grad_biases: list[Array] = [np.zeros_like(bias) for bias in self.biases]
 
         grad = dlogits
 
-        for layer_index in reversed(range(len(self.weights))):
-            previous_activation = activations[layer_index]
+        for layer_idx in reversed(range(self.num_layers)):
+            previous_activation = activations[layer_idx]
 
-            grad_weights[layer_index] = previous_activation.T @ grad
-            grad_biases[layer_index] = np.sum(grad, axis=0, keepdims=True)
+            grad_weights[layer_idx] = previous_activation.T @ grad
+            grad_biases[layer_idx] = np.sum(grad, axis=0, keepdims=True)
 
-            if layer_index > 0:
-                grad = grad @ self.weights[layer_index].T
-                previous_z = pre_activations[layer_index - 1]
-                grad = grad * self.relu_derivative(previous_z)
+            if layer_idx > 0:
+                grad = grad @ self.weights[layer_idx].T
+                previous_z = pre_activations[layer_idx - 1]
+                grad = grad * relu_derivative(previous_z)
 
         return {
             "weights": grad_weights,
             "biases": grad_biases,
         }
 
-    def update_params(
-        self,
-        grads: dict[str, list[np.ndarray]],
-        learning_rate: float,
-    ) -> None:
+    def update_params(self, grads: Gradients, learning_rate: float) -> None:
         """
-        Update model parameters using gradient descent
+        Update model parameters using vanilla gradient descent.
 
         Args:
             grads:
-                Gradients returned by backward
+                Gradients returned by backward().
 
             learning_rate:
-                Step size for gradient descent
+                Step size for gradient descent.
         """
+        if learning_rate <= 0:
+            raise ValueError(f"learning_rate must be positive, got {learning_rate}")
 
         grad_weights = grads["weights"]
         grad_biases = grads["biases"]
 
-        for layer_index in range(len(self.weights)):
-            self.weights[layer_index] -= learning_rate * grad_weights[layer_index]
-            self.biases[layer_index] -= learning_rate * grad_biases[layer_index]
+        if len(grad_weights) != self.num_layers:
+            raise ValueError(
+                f"Expected {self.num_layers} weight gradients, "
+                f"got {len(grad_weights)}"
+            )
 
-    def predict(self, x: np.ndarray) -> np.ndarray:
+        if len(grad_biases) != self.num_layers:
+            raise ValueError(
+                f"Expected {self.num_layers} bias gradients, " f"got {len(grad_biases)}"
+            )
+
+        for layer_idx in range(self.num_layers):
+            if grad_weights[layer_idx].shape != self.weights[layer_idx].shape:
+                raise ValueError(
+                    f"Weight gradient shape mismatch at layer {layer_idx}: "
+                    f"expected {self.weights[layer_idx].shape}, "
+                    f"got {grad_weights[layer_idx].shape}"
+                )
+
+            if grad_biases[layer_idx].shape != self.biases[layer_idx].shape:
+                raise ValueError(
+                    f"Bias gradient shape mismatch at layer {layer_idx}: "
+                    f"expected {self.biases[layer_idx].shape}, "
+                    f"got {grad_biases[layer_idx].shape}"
+                )
+
+            self.weights[layer_idx] -= learning_rate * grad_weights[layer_idx]
+            self.biases[layer_idx] -= learning_rate * grad_biases[layer_idx]
+
+    def predict_logits(self, X: Array) -> Array:
         """
-        predict class labels for an input batch
+        Return raw logits for an input batch.
         """
-        logits, _ = self.forward(x)
+        return self.forward(X, apply_softmax=False)
+
+    def predict_proba(self, X: Array) -> Array:
+        """
+        Return class probabilities for an input batch.
+        """
+        return self.forward(X, apply_softmax=True)
+
+    def predict(self, X: Array) -> Array:
+        """
+        Predict class labels for an input batch.
+        """
+        logits = self.predict_logits(X)
         return np.argmax(logits, axis=1)
+
+    def parameters(self) -> list[Array]:
+        """
+        Return all trainable parameters.
+
+        This is mainly useful for inspection and debugging.
+        """
+        params: list[Array] = []
+
+        for weight, bias in zip(self.weights, self.biases):
+            params.append(weight)
+            params.append(bias)
+
+        return params
+
+    def num_parameters(self) -> int:
+        """
+        Return the total number of trainable scalar parameters.
+        """
+        return int(sum(param.size for param in self.parameters()))
+
+    def summary(self) -> str:
+        """
+        Return a human-readable architecture summary.
+        """
+        lines = ["NeuralNet architecture:"]
+
+        for layer_idx, (in_dim, out_dim) in enumerate(
+            zip(self.layer_dims[:-1], self.layer_dims[1:])
+        ):
+            if layer_idx == self.num_layers - 1:
+                activation = "linear logits"
+            else:
+                activation = "ReLU"
+
+            lines.append(f"  Layer {layer_idx}: {in_dim} -> {out_dim} ({activation})")
+
+        lines.append(f"Total parameters: {self.num_parameters()}")
+
+        return "\n".join(lines)
 
 
 if __name__ == "__main__":
-    # quick sanity test
-    model = NeuralNet()
+    rng = np.random.default_rng(42)
+    model = NeuralNet(rng=rng)
 
-    x = np.random.randn(4, 784).astype(np.float32)
-    logits, cache = model.forward(x)
+    print(model.summary())
 
-    print("Forward pass successful")
+    X = rng.normal(size=(4, 784)).astype(np.float32)
+
+    logits = model.forward(X)
+    print("\nForward pass successful.")
     print(f"logits shape: {logits.shape}")
 
-    dummy_dlogits = np.random.randn(4, 10).astype(np.float32)
-    grads = model.backward(dummy_dlogits, cache)
-    model.update_params(grads, learning_rate=0.01)
+    dummy_dlogits = rng.normal(size=(4, 10)).astype(np.float32)
 
-    print("Backward pass and parameter update successful")
-    print(f"number of weights matrices : {len(grads['weights'])}")
+    grads = model.backward(dummy_dlogits)
+    print("\nBackward pass successful.")
+
+    for layer_idx, grad_weight in enumerate(grads["weights"]):
+        print(f"dW{layer_idx} shape: {grad_weight.shape}")
+
+    model.update_params(grads, learning_rate=0.01)
+    print("\nParameter update successful.")
+
+    probabilities = model.predict_proba(X)
+    predictions = model.predict(X)
+
+    print(f"\nprobabilities shape: {probabilities.shape}")
+    print(f"predictions shape: {predictions.shape}")
+    print(f"predictions: {predictions}")
