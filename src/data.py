@@ -1,137 +1,131 @@
+"""
+MNIST data loading utilities.
+
+This module loads the raw MNIST IDX gzip files from:
+
+    data/mnist/raw/
+
+Expected files:
+    train-images-idx3-ubyte.gz
+    train-labels-idx1-ubyte.gz
+    t10k-images-idx3-ubyte.gz
+    t10k-labels-idx1-ubyte.gz
+
+Images are flattened from 28x28 into 784-dimensional vectors and normalized
+to the range [0, 1].
+"""
+
 from __future__ import annotations
 
 import gzip
 import struct
 from pathlib import Path
-from typing import Tuple
 
 import numpy as np
 
-def _load_idx_images(path: Path) -> np.ndarray:
+
+def _load_idx_images(path: str | Path) -> np.ndarray:
     """
-    Load and IDX3 image file into an (N, 28, 28) uint8 array.
+    Load MNIST image data from an IDX gzip file.
 
-    Parameters
-    ----------
-    path : Path
-        Path to a gzip-compressed MNIST image file
-        (e.g. 'train-images-idx3-ubyte.gz').
-
-    Returns
-    -------
-    image : np.ndarray
-        Array of shape (num_image, 28, 28) with dtype uint8
+    Returns:
+        A NumPy array of shape (num_images, 784), dtype float32,
+        with pixel values normalized to [0, 1].
     """
-    with gzip.open(path, "rb") as f:
-        # >IIII means: big-endian, 4 unsigned 32-bit integers
-        magic, num_images, rows, cols = struct.unpack(">IIII", f.read(16))
+    path = Path(path)
 
-        # MNIST magic number for images should be 2051
+    with gzip.open(path, "rb") as file:
+        magic, num_images, rows, cols = struct.unpack(">IIII", file.read(16))
+
         if magic != 2051:
-            raise ValueError(f"Invalid magic number {magic} in image file {path}")
+            raise ValueError(f"Invalid image file magic number: {magic}")
 
-        buffer = f.read()
-        images = np.frombuffer(buffer, dtype= np.uint8)
+        buffer = file.read()
+        images = np.frombuffer(buffer, dtype=np.uint8)
 
-    if images.size != num_image * rows * cols:
-        raise ValueError(
-            f"Unexpected size {path}: "
-            f"got {images.size}, expected {nums_images * rows * cols}"
-        )
-    return images.reshape(num_images, rows, cols)
+    images = images.reshape(num_images, rows * cols)
+    images = images.astype(np.float32) / 255.0
 
-def _loag_idx_labels(path : Path) -> np.ndarray:
+    return images
+
+
+def _load_idx_labels(path: str | Path) -> np.ndarray:
     """
-    Load an IDX1 label file into an (N,) uint8 array.
+    Load MNIST label data from an IDX gzip file.
 
-    Parameters
-    ----------
-    path : Path
-        Path to a gzip-compressed MNIST label file
-        (e.g. 'train-labels-idx1-ubyte.gz')
-
-    Returns
-    -------
-    labels: np.ndarray
-        Array of shape (num_labels,) with dtype uint8
+    Returns:
+        A NumPy array of shape (num_labels,), dtype int64.
     """
-    with gzip.open(path, "rb") as f:
-        # >II means: big-endian, 2 unsigned 32-bit integers
-        magic, num_labels = struct.unpack(">II", f.read(8))
+    path = Path(path)
 
-        # MNIST magic number for labels should be 2049
+    with gzip.open(path, "rb") as file:
+        magic, num_labels = struct.unpack(">II", file.read(8))
+
         if magic != 2049:
-            raise ValueError(f"Invalid magic number {magic} in label file {path}")
+            raise ValueError(f"Invalid label file magic number: {magic}")
 
-        buffer = f.read()
+        buffer = file.read()
         labels = np.frombuffer(buffer, dtype=np.uint8)
 
-    if labels.size != num_labels:
-        raise ValueError (
-            f"Unexpected size in {path}: got {labels.size}, expected {num_labels}"
-        )
+    if labels.shape[0] != num_labels:
+        raise ValueError(f"Expected {num_labels} labels, but found {labels.shape[0]}")
 
-    return labels
+    return labels.astype(np.int64)
 
 
 def load_mnist(
-root: str | Path = "data/mnist/raw",
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    data_dir: str | Path = "data/mnist/raw",
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
-    Load the MNIST dataset from original IDX .gz files and return model-ready NumPy arrays.
+    Load the MNIST dataset.
 
-    This function assumes the following files exist under 'root':
-        - train-images-idx3-ubyte.gz
-        - train-labels-idx3-ubyte.gz
-        - train-images-idx1-ubyte.gz
-        - train-labels-idx1-ubyte.gz
+    Args:
+        data_dir:
+            Directory containing the raw MNIST IDX gzip files.
 
     Returns:
-        X_train : np.ndarray
-            Training images as float32 array of shape (10000, 784).
-            values normalized to [0, 1]
-        y_train : np.ndarray
-            Training labels as uint8 array of shape (60000,).
-        X_test : np.ndarray
-            Test images as float32 array of shape (10000, 784)
-            values normalized to [0, 1]
-        y_test : np.ndarray
-            Test labels as uint8 array of shape (10000, )
+        A tuple containing:
+
+        - x_train: shape (60000, 784), dtype float32, values in [0, 1]
+        - y_train: shape (60000,), dtype int64
+        - x_test: shape (10000, 784), dtype float32, values in [0, 1]
+        - y_test: shape (10000,), dtype int64
     """
-    root = Path(root)
+    data_dir = Path(data_dir)
 
-    train_images_path = root / "train-images-idx3-ubyte.gz"
-    train_labels_path = root / "train-labels-idx1-ubyte.gz"
-    test_images_path = root / "t10k-images-idx3-ubyte.gz"
-    test_labels_path = root / "t10k-labels-idx1-ubyte.gz"
+    train_images_path = data_dir / "train-images-idx3-ubyte.gz"
+    train_labels_path = data_dir / "train-labels-idx1-ubyte.gz"
+    test_images_path = data_dir / "t10k-images-idx3-ubyte.gz"
+    test_labels_path = data_dir / "t10k-labels-idx1-ubyte.gz"
 
-    # Basic existence checks (fail fast with clear error)
-    for p in (train_images_path, train_labels_path, test_images_path, test_labels_path):
-        if not p.is_file():
-            raise FileNotFoundError(
-                f"Required MNIST file not found: {p}. "
-                "Ensure you placed the original .gz files under data/mnist/raw."
-            )
+    required_files = [
+        train_images_path,
+        train_labels_path,
+        test_images_path,
+        test_labels_path,
+    ]
 
-    # Load raw uint8 images and labels
-    X_train_raw = _load_idx_images(train_images_path)
+    for path in required_files:
+        if not path.exists():
+            raise FileNotFoundError(f"Missing MNIST file: {path}")
+
+    x_train = _load_idx_images(train_images_path)
     y_train = _load_idx_labels(train_labels_path)
-    X_test_raw = _load_idx_images(test_images_path)
+    x_test = _load_idx_images(test_images_path)
     y_test = _load_idx_labels(test_labels_path)
 
-    X_train = X_train_raw.astype(np.float32)
-    X_test = X_test_raw.astype(np.float32)
+    return x_train, y_train, x_test, y_test
 
-    X_train = X_train.reshape(-1, 28 * 28)
-    X_test = X_test.reshape(-1, 28 * 28)
 
-    return X_train, y_train, X_test, y_test
+if __name__ == "__main__":
+    x_train, y_train, x_test, y_test = load_mnist()
 
-if __name__ = "__main__":
-    # Quick sanity check when running file
-    X_train, y_train, X_test, y_test = load_mnist()
-
-    print("X_train:", X_train.shape, X_train.dtype, X_train.min(), X_train.max())
-    print("y_train:", y_train.shape, y_train.dtype)
-    print("X_test:", X_test.shape, X_test.dtype, X_test.min(), X_test.max())
-    print("y_test:", y_test.shape, y_test.dtype)
+    print("MNIST loaded successfully.")
+    print(
+        f"x_train: {x_train.shape}, {x_train.dtype}, min={x_train.min()}, max={x_train.max()}"
+    )
+    print(f"y_train: {y_train.shape}, {y_train.dtype}")
+    print(
+        f"x_test:  {x_test.shape}, {x_test.dtype}, min={x_test.min()}, max={x_test.max()}"
+    )
+    print(f"y_test:  {y_test.shape}, {y_test.dtype}")

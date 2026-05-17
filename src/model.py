@@ -86,16 +86,98 @@ class NeuralNet:
             return softmax(logits)
         return logits
 
+    def backward(
+        self,
+        dlogits: np.ndarray,
+        cache: dict[str, list[np.ndarray] | np.ndarray],
+    ) -> dict[str, list[np.ndarray]]:
+        """
+        Run backpropagation through the network.
+
+        Args:
+            dlogits:
+                Gradient of the loss with respect to the output logits
+                Shape: (batch_size, output_size)
+
+            cache:
+                Cache returned by the forward pass
+        Returns:
+            A dictionary containing gradients for weights and biases
+        """
+        activations = cache["activations"]
+        pre_activations = cache["pre-activations"]
+
+        if not isinstance(activations, list):
+            raise TypeError("cache['activations'] must be a list")
+
+        if not isinstance(pre_activations, list):
+            raise TypeError("cache['pre_activations'] must be a list")
+
+        grad_weights: list[np.ndarray] = [np.zeros_like(w) for w in self.weights]
+        grad_biases: list[np.ndarray] = [np.zeros_like(b) for b in self.biases]
+
+        grad = dlogits
+
+        for layer_index in reversed(range(len(self.weights))):
+            previous_activation = activations[layer_index]
+
+            grad_weights[layer_index] = previous_activation.T @ grad
+            grad_biases[layer_index] = np.sum(grad, axis=0, keepdims=True)
+
+            if layer_index > 0:
+                grad = grad @ self.weights[layer_index].T
+                previous_z = pre_activations[layer_index - 1]
+                grad = grad * self.relu_derivative(previous_z)
+
+        return {
+            "weights": grad_weights,
+            "biases": grad_biases,
+        }
+
+    def update_params(
+        self,
+        grads: dict[str, list[np.ndarray]],
+        learning_rate: float,
+    ) -> None:
+        """
+        Update model parameters using gradient descent
+
+        Args:
+            grads:
+                Gradients returned by backward
+
+            learning_rate:
+                Step size for gradient descent
+        """
+
+        grad_weights = grads["weights"]
+        grad_biases = grads["biases"]
+
+        for layer_index in range(len(self.weights)):
+            self.weights[layer_index] -= learning_rate * grad_weights[layer_index]
+            self.biases[layer_index] -= learning_rate * grad_biases[layer_index]
+
+    def predict(self, x: np.ndarray) -> np.ndarray:
+        """
+        predict class labels for an input batch
+        """
+        logits, _ = self.forward(x)
+        return np.argmax(logits, axis=1)
+
 
 if __name__ == "__main__":
-    # quick sanity test or demo
-    BATCH_SIZE = 5
-    X_fake = np.random.rand(BATCH_SIZE, 784).astype(np.float32)
-
+    # quick sanity test
     model = NeuralNet()
-    logits = model.forward(X_fake)
-    probs = model.forward(X_fake, apply_softmax=True)
 
-    print("logits shape:", logits.shape)
-    print("probs shape:", probs.shape)
-    print("row sums:", probs.sum(axis=1))
+    x = np.random.randn(4, 784).astype(np.float32)
+    logits, cache = model.forward(x)
+
+    print("Forward pass successful")
+    print(f"logits shape: {logits.shape}")
+
+    dummy_dlogits = np.random.randn(4, 10).astype(np.float32)
+    grads = model.backward(dummy_dlogits, cache)
+    model.update_params(grads, learning_rate=0.01)
+
+    print("Backward pass and parameter update successful")
+    print(f"number of weights matrices : {len(grads['weights'])}")
