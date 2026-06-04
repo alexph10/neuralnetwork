@@ -32,7 +32,6 @@ def softmax_cross_entropy_loss(logits: Array, y_true: Array) -> Tuple[float, Arr
     Compute the softmax cross-entropy loss and its gradient w.r.t. logits.
 
     Parameters
-    ----------
     logits : np.ndarray
         Array of shape (batch_size, num_classes) containing raw model outputs.
     y_true : np.ndarray
@@ -40,7 +39,6 @@ def softmax_cross_entropy_loss(logits: Array, y_true: Array) -> Tuple[float, Arr
         the range [0, num_classes - 1].
 
     Returns
-    -------
     loss : float
         Scalar cross-entropy loss averaged over the batch.
     dlogits : np.ndarray
@@ -86,7 +84,6 @@ def compute_accuracy(model: NeuralNet, X: Array, y: Array) -> float:
     Compute the classification accuracy of a model on a dataset.
 
     Parameters
-    ----------
     model : NeuralNet
         Trained or partially trained model.
     X : np.ndarray
@@ -95,7 +92,6 @@ def compute_accuracy(model: NeuralNet, X: Array, y: Array) -> float:
         Integer labels of shape (num_samples,).
 
     Returns
-    -------
     accuracy : float
         Fraction of correctly classified examples in [0.0, 1.0].
     """
@@ -116,7 +112,6 @@ def iterate_minibatches(
     Generate mini-batches of (X_batch, y_batch) from the full dataset.
 
     Parameters
-    ----------
     X : np.ndarray
         Input data of shape (num_samples, input_dim).
     y : np.ndarray
@@ -129,7 +124,6 @@ def iterate_minibatches(
         Random number generator for reproducible shuffling.
 
     Yields
-    ------
     X_batch : np.ndarray
     y_batch : np.ndarray
     """
@@ -150,12 +144,10 @@ def train(config: TrainingConfig) -> Tuple[NeuralNet, TrainingHistory]:
     Train a NeuralNet on the MNIST dataset using mini-batch SGD.
 
     Parameters
-    ----------
     config : TrainingConfig
         Hyperparameters for the training run.
 
     Returns
-    -------
     model : NeuralNet
         Trained model instance.
     history : TrainingHistory
